@@ -86,7 +86,7 @@ else:
         unsafe_allow_html=True
     )
 
-    base64_audio = st.experimental_get_query_params().get("audio_data", [None])[0]
+    base64_audio = st.query_params().get("audio_data", [None])[0]
 
     if base64_audio:
         tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
