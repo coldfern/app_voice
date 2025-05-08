@@ -1,9 +1,8 @@
 streamlit==1.28.0
-numpy==1.24.3
-SpeechRecognition==3.10.0
-googletrans==4.0.0-rc1
-transformers==4.33.3
 torch==2.0.1
 whisper==1.1.10
+transformers==4.33.3
 audio-recorder-streamlit==0.0.8
-python-dotenv==1.0.0
+indic-transliteration==2.1.11
+sentencepiece==0.1.99
+protobuf==3.20.3
