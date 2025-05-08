@@ -1,5 +1,4 @@
 streamlit==1.33.0
-streamlit-audio-recorder==0.1.4
 whisper
 torchaudio
 transformers==4.37.2
