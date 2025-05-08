@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import tempfile
+import base64
 from transformers import pipeline
 import whisper
 import warnings
@@ -127,7 +128,6 @@ with st.sidebar:
 # Main processing
 if audio_data:
     # Convert base64 to binary
-    import base64
     audio_bytes = base64.b64decode(audio_data)
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
