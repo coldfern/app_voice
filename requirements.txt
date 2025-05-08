@@ -1,5 +1,5 @@
 streamlit==1.28.0
-transformers==4.30.2  # Lighter version
-torch==2.0.1          # Optimized for CPU
-numpy==1.24.3         # Stable version
+transformers==4.38.2
+torch==2.2.2
+numpy>=1.26.0
 audio-recorder-streamlit==0.0.8
