@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import tempfile
 import wave
+import numpy as np
 from audio_recorder_streamlit import audio_recorder
 from transformers import pipeline
 import whisper
@@ -38,50 +39,71 @@ def load_models():
 
 whisper_model, translator, sentiment_analyzer = load_models()
 
-def validate_wav(filepath):
-    """Check if the file is a valid WAV file"""
+def convert_to_compatible_wav(input_path, output_path):
+    """Convert any WAV file to 16kHz mono 16-bit PCM format"""
     try:
-        with wave.open(filepath, 'rb') as f:
-            if f.getnchannels() == 1 and f.getsampwidth() == 2 and f.getframerate() in [8000, 16000, 44100]:
-                return True
+        with wave.open(input_path, 'rb') as infile:
+            params = infile.getparams()
+            frames = infile.readframes(params.nframes)
+            
+            # Convert to numpy array
+            audio_array = np.frombuffer(frames, dtype=np.int16)
+            
+            # Handle stereo files by averaging channels
+            if params.nchannels == 2:
+                audio_array = audio_array.reshape(-1, 2)
+                audio_array = np.mean(audio_array, axis=1).astype(np.int16)
+            
+            # Resample if needed (simplified version)
+            if params.framerate != 16000:
+                ratio = 16000 / params.framerate
+                new_length = int(len(audio_array) * ratio)
+                audio_array = np.interp(
+                    np.linspace(0, len(audio_array), new_length),
+                    np.arange(len(audio_array)),
+                    audio_array
+                ).astype(np.int16)
+            
+            # Save as 16kHz mono 16-bit PCM
+            with wave.open(output_path, 'wb') as outfile:
+                outfile.setnchannels(1)
+                outfile.setsampwidth(2)
+                outfile.setframerate(16000)
+                outfile.writeframes(audio_array.tobytes())
+        
+        return True
+    except Exception as e:
+        st.error(f"Audio conversion failed: {str(e)}")
         return False
-    except:
-        return False
-
-def convert_to_wav_if_needed(filepath):
-    """Convert audio to WAV format if needed (simplified version)"""
-    # Since we're avoiding FFmpeg, we'll only accept proper WAV files
-    if not validate_wav(filepath):
-        raise ValueError("Only 16-bit mono WAV files at 16kHz sample rate are supported")
-    return filepath
 
 # Function to process audio
 def process_audio(audio_file_path):
     try:
-        # Convert/validate audio format
-        wav_path = convert_to_wav_if_needed(audio_file_path)
-        
-        # Transcribe with Whisper
-        result = whisper_model.transcribe(wav_path)
-        hindi_text = result["text"]
-        
-        # Translate to English
-        english_text = translator(hindi_text)[0]['translation_text']
-        
-        # Generate summary
-        sentences = english_text.split('. ')
-        summary = '. '.join(sentences[:2]) + '.' if len(sentences) > 2 else english_text
-        
-        # Sentiment analysis
-        sentiment_result = sentiment_analyzer(english_text[:512])[0]
-        sentiment = f"{sentiment_result['label']} (confidence: {sentiment_result['score']:.2f})"
-        
-        return {
-            "hindi_transcript": hindi_text,
-            "english_translation": english_text,
-            "summary": summary,
-            "sentiment": sentiment
-        }
+        # Create a temporary converted file
+        with tempfile.NamedTemporaryFile(suffix=".wav") as converted_file:
+            if convert_to_compatible_wav(audio_file_path, converted_file.name):
+                # Transcribe with Whisper
+                result = whisper_model.transcribe(converted_file.name)
+                hindi_text = result["text"]
+                
+                # Translate to English
+                english_text = translator(hindi_text)[0]['translation_text']
+                
+                # Generate summary
+                sentences = english_text.split('. ')
+                summary = '. '.join(sentences[:2]) + '.' if len(sentences) > 2 else english_text
+                
+                # Sentiment analysis
+                sentiment_result = sentiment_analyzer(english_text[:512])[0]
+                sentiment = f"{sentiment_result['label']} (confidence: {sentiment_result['score']:.2f})"
+                
+                return {
+                    "hindi_transcript": hindi_text,
+                    "english_translation": english_text,
+                    "summary": summary,
+                    "sentiment": sentiment
+                }
+        return None
     except Exception as e:
         st.error(f"Processing error: {str(e)}")
         return None
@@ -89,7 +111,7 @@ def process_audio(audio_file_path):
 # Audio input section
 with st.sidebar:
     st.header("Audio Input")
-    input_method = st.radio("Choose input method:", ("Record Audio", "Upload WAV File"))
+    input_method = st.radio("Choose input method:", ("Record Audio", "Upload Audio File"))
     
     audio_file = None
     
@@ -102,16 +124,12 @@ with st.sidebar:
                 tmp.write(audio_bytes)
                 audio_file = tmp.name
     else:
-        uploaded_file = st.file_uploader("Upload WAV file", type=["wav"])
+        uploaded_file = st.file_uploader("Upload audio file", type=["wav", "mp3", "ogg"])
         if uploaded_file:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                 tmp.write(uploaded_file.read())
                 audio_file = tmp.name
-            if validate_wav(audio_file):
-                st.audio(audio_file, format="audio/wav")
-            else:
-                st.error("Invalid WAV file. Please upload a 16-bit mono WAV file at 16kHz sample rate")
-                audio_file = None
+            st.audio(audio_file, format="audio/wav")
 
 # Main processing
 if audio_file:
@@ -159,11 +177,11 @@ if audio_file:
         if os.path.exists(audio_file):
             os.unlink(audio_file)
 else:
-    st.info("Please record or upload a WAV audio file")
+    st.info("Please record or upload an audio file")
 
 st.markdown("""
 ### Instructions:
-1. Record or upload a WAV audio file (16-bit mono, 16kHz sample rate)
+1. Record or upload an audio file (WAV, MP3, or OGG)
 2. Audio should be in Hindi or Hinglish
 3. Click "Process Audio"
 4. View results in different tabs
