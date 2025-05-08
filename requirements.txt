@@ -1,8 +1,10 @@
-streamlit
-SpeechRecognition
-pydub
+streamlit==1.22.0
+sounddevice==0.4.6
+numpy==1.23.5
+scipy==1.9.3
+torch==2.0.1
+transformers==4.30.2
 googletrans==4.0.0-rc1
-transformers
-torch
-librosa
-soundfile
+librosa==0.10.0
+soundfile==0.12.1
+pydub==0.25.1
