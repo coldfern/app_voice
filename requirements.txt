@@ -1,5 +1,5 @@
 streamlit>=1.20.0
-streamlit-audiorecorder>=0.1.7
+streamlit-audiorecorder>=0.0.6
 SpeechRecognition>=3.8.1
 googletrans==4.0.0-rc1
 transformers>=4.20.0
