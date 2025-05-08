@@ -1,1 +1,7 @@
-streamlit pydub SpeechRecognition googletrans==4.0.0-rc1 transformers torch numpy
+streamlit
+pydub
+SpeechRecognition
+googletrans==4.0.0-rc1
+transformers
+torch
+numpy
