@@ -3,9 +3,9 @@ import os
 import tempfile
 from audio_recorder_streamlit import audio_recorder
 from transformers import pipeline
-import whisper
+import torch
+from faster_whisper import WhisperModel
 import warnings
-from googletrans import Translator
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -17,24 +17,32 @@ st.title("🇮🇳 Hindi/Hinglish Audio Processor")
 # Initialize models (cache them for performance)
 @st.cache_resource
 def load_models():
-    # Whisper model for transcription (tiny is fastest, small for better accuracy)
-    whisper_model = whisper.load_model("tiny")
+    # Faster Whisper model for transcription (tiny is fastest)
+    whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
     
-    # Translation using Helsinki-NLP (free model)
-    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-hi-en")
+    # Translation pipeline (smaller model)
+    translator = pipeline("translation_hi_to_en", 
+                         model="Helsinki-NLP/opus-mt-hi-en",
+                         device="cpu")
     
     # Sentiment analysis pipeline
-    sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+    sentiment_analyzer = pipeline("sentiment-analysis", 
+                                model="distilbert-base-uncased-finetuned-sst-2-english",
+                                device="cpu")
     
     return whisper_model, translator, sentiment_analyzer
 
-whisper_model, translator, sentiment_analyzer = load_models()
+try:
+    whisper_model, translator, sentiment_analyzer = load_models()
+except Exception as e:
+    st.error(f"Failed to load models: {e}")
+    st.stop()
 
 # Function to process audio
 def process_audio(audio_file_path):
     # Transcribe with Whisper
-    result = whisper_model.transcribe(audio_file_path)
-    hindi_text = result["text"]
+    segments, info = whisper_model.transcribe(audio_file_path)
+    hindi_text = " ".join([segment.text for segment in segments])
     
     # Translate to English
     try:
