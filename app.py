@@ -1,15 +1,12 @@
 import streamlit as st
 import os
-import time
-from datetime import datetime
-import numpy as np
 import tempfile
 from audio_recorder_streamlit import audio_recorder
-import speech_recognition as sr
-from googletrans import Translator
 from transformers import pipeline
 import whisper
 import warnings
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -21,16 +18,18 @@ st.title("🇮🇳 Hindi/Hinglish Audio Processor")
 # Initialize models (cache them for performance)
 @st.cache_resource
 def load_models():
-    # Whisper model for transcription
-    whisper_model = whisper.load_model("base")
+    # Whisper model for transcription (small is faster than base for Hindi)
+    whisper_model = whisper.load_model("small")
+    
+    # Translation pipeline (Helsinki-NLP Opus MT models)
+    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-hi-en")
     
     # Sentiment analysis pipeline
     sentiment_analyzer = pipeline("sentiment-analysis", model="finiteautomata/bertweet-base-sentiment-analysis")
     
-    return whisper_model, sentiment_analyzer
+    return whisper_model, translator, sentiment_analyzer
 
-whisper_model, sentiment_analyzer = load_models()
-translator = Translator()
+whisper_model, translator, sentiment_analyzer = load_models()
 
 # Function to process audio
 def process_audio(audio_file_path):
@@ -40,10 +39,10 @@ def process_audio(audio_file_path):
     
     # Translate to English
     try:
-        translation = translator.translate(hindi_text, src='hi', dest='en')
-        english_text = translation.text
+        english_text = translator(hindi_text)[0]['translation_text']
     except:
-        english_text = "Translation failed. Please try again."
+        # Fallback to transliteration if translation fails
+        english_text = transliterate(hindi_text, sanscript.DEVANAGARI, sanscript.ITRANS)
     
     # Generate summary (simple approach)
     sentences = english_text.split('. ')
@@ -72,8 +71,8 @@ with st.sidebar:
     audio_file = None
     
     if input_method == "Record Audio":
-        st.write("Record your Hindi/Hinglish audio:")
-        audio_bytes = audio_recorder(pause_threshold=5.0, sample_rate=41_000)
+        st.write("Record your Hindi/Hinglish audio (5 second minimum):")
+        audio_bytes = audio_recorder(pause_threshold=5.0, sample_rate=16_000)
         
         if audio_bytes:
             st.audio(audio_bytes, format="audio/wav")
@@ -92,7 +91,7 @@ with st.sidebar:
 # Main processing
 if audio_file:
     if st.button("Process Audio"):
-        with st.spinner("Processing your audio... This may take a moment..."):
+        with st.spinner("Processing your audio... This may take 1-2 minutes..."):
             try:
                 results = process_audio(audio_file)
                 
@@ -159,5 +158,5 @@ st.markdown("""
    - Sentiment Analysis
 4. Download the results as text files
 
-Note: Processing may take some time depending on audio length.
+Note: First-time processing may take 2-3 minutes to download models.
 """)
