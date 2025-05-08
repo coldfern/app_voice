@@ -1,8 +1,8 @@
-streamlit==1.28.0
-openai-whisper==20231117
+streamlit
+openai-whisper
 torch==2.2.2
 transformers==4.38.2
 audio-recorder-streamlit==0.0.8
-indic-transliteration==2.1.11
+indic-transliteration
 sentencepiece==0.2.0
 protobuf==3.20.3
