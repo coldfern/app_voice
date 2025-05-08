@@ -1,120 +1,75 @@
 import streamlit as st
-import pyaudio
-import wave
 import numpy as np
-import scipy.io.wavfile as wav
-import torch
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor, pipeline
-from googletrans import Translator
-import io
+from transformers import pipeline
 import librosa
 import soundfile as sf
+import tempfile
+import os
 
-# Load pre-trained Wav2Vec2 model and processor for Hindi ASR
-processor = Wav2Vec2Processor.from_pretrained("Harveenchadha/vakyansh-wav2vec2-hindi-him-4200")
-model = Wav2Vec2ForCTC.from_pretrained("Harveenchadha/vakyansh-wav2vec2-hindi-him-4200")
-
-# Initialize translator
-translator = Translator()
-
-# Function to record audio
-def record_audio(duration, sample_rate=16000):
-    st.write("🎙️ Recording...")
+# Set up models (will download on first run)
+@st.cache_resource
+def load_models():
+    # Hindi ASR model
+    asr_pipe = pipeline("automatic-speech-recognition", model="Harveenchadha/vakyansh-wav2vec2-hindi-him-4200")
     
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16,
-                    channels=1,
-                    rate=sample_rate,
-                    input=True,
-                    frames_per_buffer=1024)
-
-    frames = []
-    for _ in range(0, int(sample_rate / 1024 * duration)):
-        data = stream.read(1024)
-        frames.append(data)
-
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
+    # Translation & text processing
+    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-hi-en")
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    sentiment = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
     
-    st.write("✅ Recording complete.")
-    return np.frombuffer(b''.join(frames), sample_rate
+    return asr_pipe, translator, summarizer, sentiment
 
-# Function to save audio as WAV
-def save_audio(audio, sample_rate, filename="recorded_audio.wav"):
-    wav.write(filename, sample_rate, audio)
-    return filename
-
-# Function to process and transcribe audio
-def transcribe_audio(audio_data, sample_rate):
-    # Convert audio data to float32 (normalize)
-    audio_data = audio_data.astype(np.float32) / np.iinfo(np.int16).max
-
-    # Preprocess for Wav2Vec2
-    input_values = processor(audio_data, sampling_rate=sample_rate, return_tensors="pt").input_values.float()
-
-    # Perform inference
-    with torch.no_grad():
-        logits = model(input_values).logits
-
-    # Decode to text
-    predicted_ids = torch.argmax(logits, dim=-1)
-    transcription = processor.decode(predicted_ids[0], skip_special_tokens=True)
-
-    return transcription
-
-# Function to translate Hindi text to English
-def translate_to_english(text):
-    translation = translator.translate(text, src='hi', dest='en')
-    return translation.text
-
-# Function to summarize English text
-def summarize_text(text, max_length=250, min_length=30):
-    summarizer = pipeline("summarization")
-    summary = summarizer(text, max_length=max_length, min_length=min_length, do_sample=False)
-    return summary[0]['summary_text']
-
-# Streamlit App
 def main():
-    st.title("🎙️ Record Audio to Get Transcripts and Summary :)")
+    st.title("🎙️ Audio Processor")
+    st.write("Record or upload Hindi audio to get transcription, translation, summary and sentiment analysis")
 
-    # Option: Record or Upload
-    option = st.radio("Choose an option:", ["🎤 Record Audio", "📂 Upload Audio File"])
-
-    audio_data = None
-    sample_rate = 16000  # Default sample rate
-
-    if option == "🎤 Record Audio":
-        duration = st.slider("Select recording duration (seconds)", 1, 1200, 10)
-        if st.button("Start Recording"):
-            audio, sample_rate = record_audio(duration)
-            audio_path = save_audio(audio, sample_rate)
-            st.audio(audio_path, format="audio/wav")
-            audio_data, _ = librosa.load(audio_path, sr=sample_rate)
-
-    elif option == "📂 Upload Audio File":
-        uploaded_file = st.file_uploader("Upload an audio file...", type=["wav", "mp3", "ogg"])
-        if uploaded_file:
-            st.audio(uploaded_file, format="audio/wav")
-            with io.BytesIO(uploaded_file.read()) as audio_io:
-                audio_data, sample_rate = librosa.load(audio_io, sr=16000)
-
-    # If audio is available, process it
-    if audio_data is not None:
-        st.write("📝 **Transcribing audio...**")
-        transcription = transcribe_audio(audio_data, sample_rate)
-        st.write("**Hindi Transcription:**")
-        st.success(transcription)
-
-        st.write("🌍 **Translating to English...**")
-        translation = translate_to_english(transcription)
-        st.write("**English Translation:**")
-        st.info(translation)
-
-        st.write("✍️ **Summarizing...**")
-        summary = summarize_text(translation)
-        st.write("**Summary:**")
-        st.warning(summary)
+    # Audio input
+    audio_bytes = st.audio_recorder("Click to record", pause_threshold=2.0)
+    
+    if audio_bytes and audio_bytes['bytes']:
+        # Save recording to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(audio_bytes['bytes'])
+            audio_path = tmp.name
+        
+        st.audio(audio_bytes['bytes'], format="audio/wav")
+        
+        if st.button("Process Audio"):
+            with st.spinner("Loading models..."):
+                asr_pipe, translator, summarizer, sentiment = load_models()
+            
+            # Convert to 16kHz mono for ASR
+            with st.spinner("Preparing audio..."):
+                y, sr = librosa.load(audio_path, sr=16000, mono=True)
+                sf.write(audio_path, y, sr)
+            
+            # Transcription
+            with st.spinner("Transcribing..."):
+                transcript = asr_pipe(audio_path)["text"]
+                st.subheader("Hindi Transcription")
+                st.write(transcript)
+            
+            # Translation
+            with st.spinner("Translating..."):
+                translation = translator(transcript)[0]["translation_text"]
+                st.subheader("English Translation")
+                st.write(translation)
+            
+            # Summary
+            with st.spinner("Summarizing..."):
+                summary = summarizer(translation, max_length=130, min_length=30)[0]["summary_text"]
+                st.subheader("Summary")
+                st.write(summary)
+            
+            # Sentiment
+            with st.spinner("Analyzing sentiment..."):
+                sentiment_result = sentiment(translation)[0]
+                st.subheader("Sentiment Analysis")
+                st.write(f"Label: {sentiment_result['label']}")
+                st.write(f"Confidence: {sentiment_result['score']:.2f}")
+        
+        # Clean up
+        os.unlink(audio_path)
 
 if __name__ == "__main__":
     main()
