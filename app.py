@@ -1,212 +1,124 @@
 import streamlit as st
-from streamlit_audiorecorder import audiorecorder
 import speech_recognition as sr
 from googletrans import Translator
 from transformers import pipeline
-import tempfile
 import os
+import tempfile
+from pydub import AudioSegment
+import numpy as np
 
-st.set_page_config(
-    page_title="Hindi Audio Transcription, Translation & Analysis",
-    layout="centered",
-    initial_sidebar_state="auto"
-)
+# Set page config
+st.set_page_config(page_title="Hindi/Hinglish Audio Processor", layout="wide")
 
-# Inline CSS for modern styling and responsiveness
-st.markdown(
-    """
-    <style>
-    .main > .block-container {
-        padding: 1rem 2rem;
-        max-width: 700px;
-        margin: auto;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-          Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-        color: #0e1117;
-    }
-    h1 {
-        color: #4a90e2;
-        font-weight: 700;
-        letter-spacing: 0.03em;
-        margin-bottom: 0.2rem;
-    }
-    .stButton>button {
-        background: linear-gradient(90deg,#4a90e2 0%,#007aff 100%);
-        color: white;
-        font-weight: 600;
-        border-radius: 0.4rem;
-        padding: 0.4rem 1rem;
-        transition: background 0.3s ease;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(90deg,#007aff 0%,#4a90e2 100%);
-        color: white;
-    }
-    .section-header {
-        margin-top: 2rem;
-        font-weight: 600;
-        border-bottom: 2px solid #4a90e2;
-        padding-bottom: 0.3rem;
-        margin-bottom: 1rem;
-        font-size: 1.2rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Initialize components
+translator = Translator()
+sentiment_analyzer = pipeline("sentiment-analysis", model="finiteautomata/bertweet-base-sentiment-analysis")
+summarizer = pipeline("summarization", model="google/pegasus-cnn_dailymail")
 
-st.title("🎤 Hindi / Hinglish Audio Transcriber & Analyzer")
-st.write("Record or upload your Hindi/Hinglish audio. Get transcript, English translation, summary, and sentiment analysis.")
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file to a temporary file and return path"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        return tmp_file.name
 
-# Initialize Translator and NLP pipelines once to avoid reload penalties
-@st.cache_resource
-def load_translator():
-    return Translator()
+def convert_to_wav(input_path, output_path):
+    """Convert any audio file to WAV format"""
+    audio = AudioSegment.from_file(input_path)
+    audio.export(output_path, format="wav")
+    return output_path
 
-@st.cache_resource(show_spinner=False)
-def load_summarizer():
-    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+def transcribe_audio(audio_path, language='hi-IN'):
+    """Transcribe audio using SpeechRecognition"""
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(audio_path) as source:
+        audio_data = recognizer.record(source)
+        try:
+            text = recognizer.recognize_google(audio_data, language=language)
+            return text
+        except sr.UnknownValueError:
+            return "Could not understand audio"
+        except sr.RequestError:
+            return "API unavailable"
 
-@st.cache_resource(show_spinner=False)
-def load_sentiment():
-    return pipeline("sentiment-analysis")
-
-translator = load_translator()
-summarizer = load_summarizer()
-sentiment_analyzer = load_sentiment()
-
-def transcribe_audio(file_path):
-    """Transcribe Hindi/Hinglish audio to text using Google's Web Speech API."""
-    r = sr.Recognizer()
-    with sr.AudioFile(file_path) as source:
-        audio_data = r.record(source)
+def translate_text(text, src='hi', dest='en'):
+    """Translate text using googletrans"""
     try:
-        # Language hints for Hindi - Google's recognizer supports 'hi-IN'
-        text = r.recognize_google(audio_data, language="hi-IN")
-        return text
-    except sr.UnknownValueError:
-        return None
-    except sr.RequestError:
-        return None
-
-def translate_text(text):
-    try:
-        # Translate detected text to English
-        translation = translator.translate(text, src='hi', dest='en')
+        translation = translator.translate(text, src=src, dest=dest)
         return translation.text
-    except Exception:
-        return None
-
-def summarize_text(text):
-    try:
-        # Huggingface pipeline summarization limits max tokens input, so chunk if needed
-        max_chunk = 500
-        # Chunk text intelligently
-        if len(text) > max_chunk:
-            chunks = [text[i:i+max_chunk] for i in range(0, len(text), max_chunk)]
-            summaries = [summarizer(chunk, max_length=50, min_length=25, do_sample=False)[0]['summary_text'] for chunk in chunks]
-            return " ".join(summaries)
-        else:
-            summary = summarizer(text, max_length=50, min_length=25, do_sample=False)[0]['summary_text']
-            return summary
-    except Exception:
-        return None
+    except:
+        return "Translation failed"
 
 def analyze_sentiment(text):
+    """Analyze sentiment of English text"""
     try:
-        result = sentiment_analyzer(text)
-        # result is a list of dicts with 'label' and 'score'
-        return result[0]['label'], result[0]['score']
-    except Exception:
-        return None, None
+        result = sentiment_analyzer(text)[0]
+        return f"{result['label']} (confidence: {result['score']:.2f})"
+    except:
+        return "Sentiment analysis failed"
 
-# Tabs for recording or uploading audio
-tab1, tab2 = st.tabs(["🎙️ Record Audio", "📁 Upload Audio"])
+def summarize_text(text):
+    """Generate summary of English text"""
+    try:
+        summary = summarizer(text, max_length=130, min_length=30, do_sample=False)
+        return summary[0]['summary_text']
+    except:
+        return "Summary generation failed"
 
-transcript = None
-translated = None
-summary = None
-sentiment = None
+def main():
+    st.title("Hindi/Hinglish Audio Processor")
+    st.write("Upload an audio file or record your voice to get transcriptions, translations, summaries and sentiment analysis.")
 
-with tab1:
-    st.markdown("### Record your audio (max 30 seconds)")
-    audio_bytes = audiorecorder("Start/Stop Recording", recording_color="#4a90e2", neutral_color="#6c757d", sample_rate=16000)
-    if len(audio_bytes) > 0:
-        st.audio(audio_bytes, format="audio/wav")
-        # Save to a temporary wav file to process
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
-            tmp_wav.write(audio_bytes)
-            tmp_wav_path = tmp_wav.name
+    # Audio input options
+    input_method = st.radio("Choose input method:", ("Upload Audio", "Record Audio"))
 
-        with st.spinner("Transcribing audio..."):
-            transcript = transcribe_audio(tmp_wav_path)
-        os.unlink(tmp_wav_path)
+    audio_path = None
+    
+    if input_method == "Upload Audio":
+        uploaded_file = st.file_uploader("Upload audio file", type=['wav', 'mp3', 'ogg', 'm4a'])
+        if uploaded_file:
+            audio_path = save_uploaded_file(uploaded_file)
+            if not audio_path.endswith('.wav'):
+                with st.spinner("Converting to WAV format..."):
+                    wav_path = audio_path + '.wav'
+                    convert_to_wav(audio_path, wav_path)
+                    os.unlink(audio_path)
+                    audio_path = wav_path
+            st.audio(audio_path)
+    else:
+        recorded_audio = st.audio_recorder("Click to record", pause_threshold=2.0)
+        if recorded_audio:
+            audio_bytes = recorded_audio['bytes']
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                tmp_file.write(audio_bytes)
+                audio_path = tmp_file.name
+            st.audio(audio_path)
 
-        if transcript:
-            st.success("Transcription successful!")
-            st.markdown(f"**Transcript (Hindi/Hinglish):**  \n{transcript}")
-        else:
-            st.error("Sorry, could not transcribe the audio. Please try again.")
+    if audio_path and st.button("Process Audio"):
+        with st.spinner("Processing..."):
+            # Step 1: Transcribe
+            st.subheader("Original Transcription")
+            hindi_text = transcribe_audio(audio_path)
+            st.write(hindi_text)
 
-with tab2:
-    st.markdown("### Upload your audio file (WAV format only)")
-    uploaded_file = st.file_uploader("Upload a WAV audio file", type=["wav"])
-    if uploaded_file is not None:
-        st.audio(uploaded_file, format="audio/wav")
+            if hindi_text and not hindi_text.startswith("Could not"):
+                # Step 2: Translate
+                st.subheader("English Translation")
+                english_text = translate_text(hindi_text)
+                st.write(english_text)
 
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_wav:
-            tmp_wav.write(uploaded_file.read())
-            tmp_wav_path = tmp_wav.name
+                # Step 3: Sentiment Analysis
+                st.subheader("Sentiment Analysis")
+                sentiment = analyze_sentiment(english_text)
+                st.write(sentiment)
 
-        with st.spinner("Transcribing uploaded audio..."):
-            transcript = transcribe_audio(tmp_wav_path)
+                # Step 4: Summary
+                st.subheader("Summary")
+                summary = summarize_text(english_text)
+                st.write(summary)
+            
+        # Clean up temporary files
+        if os.path.exists(audio_path):
+            os.unlink(audio_path)
 
-        os.unlink(tmp_wav_path)
-
-        if transcript:
-            st.success("Transcription successful!")
-            st.markdown(f"**Transcript (Hindi/Hinglish):**  \n{transcript}")
-        else:
-            st.error("Sorry, could not transcribe the uploaded audio. Please upload a clear WAV audio.")
-
-# If transcript obtained, process translation, summary, sentiment
-if transcript:
-    with st.expander("🇬🇧 English Translation"):
-        with st.spinner("Translating transcript..."):
-            translated = translate_text(transcript)
-        if translated:
-            st.markdown(translated)
-        else:
-            st.error("Translation failed.")
-
-    if translated:
-        with st.expander("📝 Summary"):
-            with st.spinner("Generating summary..."):
-                summary = summarize_text(translated)
-            if summary:
-                st.markdown(summary)
-            else:
-                st.error("Summary generation failed.")
-
-        with st.expander("😊 Sentiment Analysis"):
-            with st.spinner("Analyzing sentiment..."):
-                sentiment_label, sentiment_score = analyze_sentiment(summary if summary else translated)
-            if sentiment_label:
-                sentiment_color = "#4CAF50" if sentiment_label.lower() in ["positive", "joy", "happy"] else "#F44336" if sentiment_label.lower() in ["negative", "sadness", "anger", "fear"] else "#FFA500"
-                st.markdown(f"**Sentiment:** <span style='color:{sentiment_color}; font-weight:bold'>{sentiment_label}</span> (Confidence: {sentiment_score:.2f})", unsafe_allow_html=True)
-            else:
-                st.error("Sentiment analysis failed.")
-else:
-    st.info("Record or upload an audio file above to get started.")
-
-st.markdown(
-    """
-    <hr>
-    <footer style="text-align:center; font-size:0.8rem; color: #777;">
-    Developed with ❤️ using Streamlit. Supports Hindi and Hinglish audio transcription.
-    </footer>
-    """,
-    unsafe_allow_html=True,
-)
-
-
+if __name__ == "__main__":
+    main()
