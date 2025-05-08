@@ -1,59 +1,64 @@
 import streamlit as st
-import whisper
+import speech_recognition as sr
 import tempfile
 import os
 from transformers import pipeline
 from googletrans import Translator
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from pydub import AudioSegment
 
-st.set_page_config(page_title="Hindi Audio Summarizer", layout="centered")
-st.title("🎙️ Hindi/Hinglish Audio to English Transcript, Summary & Sentiment")
+st.set_page_config(page_title="Hindi Audio App", layout="centered")
+st.title("🎙️ Hindi/Hinglish Audio Summarizer")
 
-# Load resources
 @st.cache_resource
 def load_models():
-    model = whisper.load_model("base")
     summarizer = pipeline("summarization", model="google/pegasus-xsum")
-    return model, summarizer
+    return summarizer
 
-model, summarizer = load_models()
+summarizer = load_models()
 translator = Translator()
 analyzer = SentimentIntensityAnalyzer()
 
-# Upload or record
-audio_file = st.file_uploader("Upload your Hindi/Hinglish audio", type=["mp3", "wav", "m4a"])
+# Upload audio file
+audio_file = st.file_uploader("Upload Hindi/Hinglish audio (wav/mp3)", type=["wav", "mp3"])
 
-if audio_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False) as temp_audio:
-        temp_audio.write(audio_file.read())
+if audio_file:
+    st.info("📥 Processing audio...")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        if audio_file.type == "audio/mp3":
+            sound = AudioSegment.from_file(audio_file, format="mp3")
+            sound.export(temp_audio.name, format="wav")
+        else:
+            temp_audio.write(audio_file.read())
         temp_path = temp_audio.name
 
-    st.info("🔁 Transcribing audio using Whisper...")
-    result = model.transcribe(temp_path)
-    hindi_text = result["text"]
-    st.success("✅ Transcription complete.")
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(temp_path) as source:
+        audio_data = recognizer.record(source)
+        try:
+            st.info("🗣️ Transcribing using Google Web Speech API...")
+            text = recognizer.recognize_google(audio_data, language="hi-IN")
+            st.success("✅ Transcription complete.")
 
-    st.subheader("📜 Transcription (Hindi/Hinglish):")
-    st.write(hindi_text)
+            st.subheader("📜 Transcription (Hindi/Hinglish):")
+            st.write(text)
 
-    st.info("🌐 Translating to English...")
-    translated = translator.translate(hindi_text, src="hi", dest="en")
-    english_text = translated.text
-    st.subheader("🔤 English Translation:")
-    st.write(english_text)
+            st.info("🌐 Translating to English...")
+            translated = translator.translate(text, src="hi", dest="en").text
+            st.subheader("🔤 Translation:")
+            st.write(translated)
 
-    st.info("🧠 Generating Summary...")
-    summary = summarizer(english_text, max_length=60, min_length=20, do_sample=False)[0]['summary_text']
-    st.subheader("📝 Summary:")
-    st.write(summary)
+            st.info("🧠 Summarizing...")
+            summary = summarizer(translated, max_length=60, min_length=20, do_sample=False)[0]["summary_text"]
+            st.subheader("📝 Summary:")
+            st.write(summary)
 
-    st.info("💬 Performing Sentiment Analysis...")
-    sentiment = analyzer.polarity_scores(english_text)
-    sentiment_label = max(sentiment, key=sentiment.get).capitalize()
-    st.subheader("📈 Sentiment:")
-    st.write(f"{sentiment_label} ({sentiment})")
+            st.info("📊 Analyzing Sentiment...")
+            sentiment = analyzer.polarity_scores(translated)
+            label = max(sentiment, key=sentiment.get).capitalize()
+            st.subheader("💬 Sentiment:")
+            st.write(f"{label} ({sentiment})")
 
-    # Clean up temp file
+        except Exception as e:
+            st.error(f"Transcription failed: {e}")
     os.remove(temp_path)
-else:
-    st.info("Please upload a .mp3, .wav or .m4a file to get started.")
