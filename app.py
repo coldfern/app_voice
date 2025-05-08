@@ -1,86 +1,79 @@
 import streamlit as st
-import numpy as np
-import wave
+import speech_recognition as sr
 import tempfile
+import os
 from transformers import pipeline
 from googletrans import Translator
-from audio_recorder_streamlit import audio_recorder
-import os
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from pydub import AudioSegment
+from audiorecorder import audiorecorder
 
-# App setup - minimal for speed
-st.set_page_config(page_title="⚡ Hindi Processor", layout="centered")
-st.title("⚡ Instant Hindi Audio Processing")
+st.set_page_config(page_title="Hindi Audio App", layout="centered")
+st.title("🎙️ Hindi/Hinglish Audio Summarizer")
 
-# Load TINY models (cached)
 @st.cache_resource
 def load_models():
-    # Tiny Hindi ASR model (5x faster than Whisper)
-    asr = pipeline(
-        "automatic-speech-recognition", 
-        model="ai4bharat/indicwav2vec-hindi",
-        device="cpu"
-    )
-    
-    # Tiny translator
-    translator = Translator()
-    
-    # Lightweight sentiment analysis
-    sentiment = pipeline(
-        "sentiment-analysis",
-        model="finiteautomata/bertweet-base-sentiment-analysis",
-        device="cpu"
-    )
-    
-    return asr, translator, sentiment
+    summarizer = pipeline("summarization", model="google/pegasus-xsum")
+    return summarizer
 
-asr_model, translator, sentiment_analyzer = load_models()
+summarizer = load_models()
+translator = Translator()
+analyzer = SentimentIntensityAnalyzer()
 
-def process_audio_fast(audio_bytes):
-    """Ultra-fast processing pipeline"""
-    try:
-        # Step 1: Convert to WAV in memory
-        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-        
-        # Step 2: Transcribe (takes <2s for 10s audio)
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-            with wave.open(tmp.name, 'wb') as wav:
-                wav.setnchannels(1)
-                wav.setsampwidth(2)
-                wav.setframerate(16000)
-                wav.writeframes(audio_array)
-            hindi_text = asr_model(tmp.name)["text"][:500]  # Limit to 500 chars
-        
-        # Step 3: Translate (takes <1s)
-        english_text = translator.translate(hindi_text, src='hi', dest='en').text
-        
-        # Step 4: Quick summary (first sentence)
-        summary = english_text.split('.')[0] + '.'
-        
-        # Step 5: Fast sentiment (takes <1s)
-        sentiment = sentiment_analyzer(english_text[:256])[0]
-        
-        return {
-            "Hindi": hindi_text,
-            "English": english_text,
-            "Summary": summary,
-            "Sentiment": f"{sentiment['label']} ({sentiment['score']:.0%})"
-        }
-        
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        return None
+st.header("🎛️ Record or Upload Audio")
 
-# Super simple UI
-audio_bytes = audio_recorder(
-    "Speak Hindi (5-15s)", 
-    pause_threshold=5.0,
-    sample_rate=16000
-)
+# Record audio using mic
+audio_bytes = audiorecorder("Click to record", "Recording...")
+
+# Upload audio manually
+uploaded_file = st.file_uploader("Or upload an audio file (mp3/wav)", type=["mp3", "wav"])
 
 if audio_bytes:
-    if st.button("🚀 Process (3-5s)", type="primary"):
-        with st.spinner("Processing fast..."):
-            results = process_audio_fast(audio_bytes)
-            if results:
-                st.json(results)
-                st.audio(audio_bytes, format="audio/wav")
+    st.success("✅ Audio recorded. Processing...")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        f.write(audio_bytes)
+        audio_path = f.name
+elif uploaded_file:
+    st.success("✅ Audio uploaded. Processing...")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+        if uploaded_file.type == "audio/mp3":
+            sound = AudioSegment.from_file(uploaded_file, format="mp3")
+            sound.export(f.name, format="wav")
+        else:
+            f.write(uploaded_file.read())
+        audio_path = f.name
+else:
+    st.stop()
+
+# Transcribe
+recognizer = sr.Recognizer()
+with sr.AudioFile(audio_path) as source:
+    audio_data = recognizer.record(source)
+    try:
+        st.info("🗣️ Transcribing using Google Web Speech API...")
+        text = recognizer.recognize_google(audio_data, language="hi-IN")
+        st.success("✅ Transcription complete.")
+
+        st.subheader("📜 Transcription:")
+        st.write(text)
+
+        st.info("🌐 Translating to English...")
+        translation = translator.translate(text, src="hi", dest="en").text
+        st.subheader("🔤 Translation:")
+        st.write(translation)
+
+        st.info("🧠 Summarizing...")
+        summary = summarizer(translation, max_length=60, min_length=20, do_sample=False)[0]["summary_text"]
+        st.subheader("📝 Summary:")
+        st.write(summary)
+
+        st.info("📊 Analyzing Sentiment...")
+        sentiment = analyzer.polarity_scores(translation)
+        sentiment_label = max(sentiment, key=sentiment.get).capitalize()
+        st.subheader("💬 Sentiment:")
+        st.write(f"{sentiment_label} ({sentiment})")
+
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+finally:
+    os.remove(audio_path)
