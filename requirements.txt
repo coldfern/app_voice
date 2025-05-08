@@ -1,6 +1,1 @@
-streamlit
-sounddevice
-numpy
-torch
-openai-whisper
-deep_translator
+streamlit pydub SpeechRecognition googletrans==4.0.0-rc1 transformers torch numpy
