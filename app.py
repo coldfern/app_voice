@@ -219,18 +219,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-</content>
-</create_file>
 
-<attempt_completion>
-✅ Task complete: Created a Streamlit app that allows users to record or upload Hindi/Hinglish audio, then transcribes it using a Hugging Face wav2vec2 Hindi model, translates Hindi transcript to English using Helsinki-NLP model, generates a summary, and performs sentiment analysis—all without using OpenAI API.
-
-- Uses streamlit-webrtc for audio recording.
-- Uses transformers pipelines and pretrained models.
-- Entirely self-contained in a single Python file.
-- Instructions and UI for easy usage.
-- Ready for deployment on Streamlit Cloud or local machine.
-
-To run the app locally:
-
-1. Install dependencies:
