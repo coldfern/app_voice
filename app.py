@@ -1,79 +1,113 @@
 import streamlit as st
-import speech_recognition as sr
 import tempfile
-import os
+import numpy as np
+import wave
 from transformers import pipeline
 from googletrans import Translator
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from pydub import AudioSegment
-from audiorecorder import audiorecorder
+from audio_recorder_streamlit import audio_recorder
+import os
 
-st.set_page_config(page_title="Hindi Audio App", layout="centered")
-st.title("🎙️ Hindi/Hinglish Audio Summarizer")
+# App setup
+st.set_page_config(page_title="Hindi Audio Processor", layout="centered")
+st.title("🎙️ Hindi/Hinglish Audio Processor")
 
+# Initialize models (cached)
 @st.cache_resource
 def load_models():
-    summarizer = pipeline("summarization", model="google/pegasus-xsum")
-    return summarizer
-
-summarizer = load_models()
-translator = Translator()
-analyzer = SentimentIntensityAnalyzer()
-
-st.header("🎛️ Record or Upload Audio")
-
-# Record audio using mic
-audio_bytes = audiorecorder("Click to record", "Recording...")
-
-# Upload audio manually
-uploaded_file = st.file_uploader("Or upload an audio file (mp3/wav)", type=["mp3", "wav"])
-
-if audio_bytes:
-    st.success("✅ Audio recorded. Processing...")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        f.write(audio_bytes)
-        audio_path = f.name
-elif uploaded_file:
-    st.success("✅ Audio uploaded. Processing...")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        if uploaded_file.type == "audio/mp3":
-            sound = AudioSegment.from_file(uploaded_file, format="mp3")
-            sound.export(f.name, format="wav")
-        else:
-            f.write(uploaded_file.read())
-        audio_path = f.name
-else:
-    st.stop()
-
-# Transcribe
-recognizer = sr.Recognizer()
-with sr.AudioFile(audio_path) as source:
-    audio_data = recognizer.record(source)
     try:
-        st.info("🗣️ Transcribing using Google Web Speech API...")
-        text = recognizer.recognize_google(audio_data, language="hi-IN")
-        st.success("✅ Transcription complete.")
-
-        st.subheader("📜 Transcription:")
-        st.write(text)
-
-        st.info("🌐 Translating to English...")
-        translation = translator.translate(text, src="hi", dest="en").text
-        st.subheader("🔤 Translation:")
-        st.write(translation)
-
-        st.info("🧠 Summarizing...")
-        summary = summarizer(translation, max_length=60, min_length=20, do_sample=False)[0]["summary_text"]
-        st.subheader("📝 Summary:")
-        st.write(summary)
-
-        st.info("📊 Analyzing Sentiment...")
-        sentiment = analyzer.polarity_scores(translation)
-        sentiment_label = max(sentiment, key=sentiment.get).capitalize()
-        st.subheader("💬 Sentiment:")
-        st.write(f"{sentiment_label} ({sentiment})")
-
+        # Load automatic speech recognition (ASR) model
+        asr_pipeline = pipeline(
+            "automatic-speech-recognition",
+            model="ai4bharat/indicwav2vec-hindi"
+        )
+        
+        # Initialize translator
+        translator = Translator()
+        
+        # Load sentiment analysis model
+        sentiment_analyzer = pipeline(
+            "sentiment-analysis",
+            model="distilbert-base-uncased-finetuned-sst-2-english"
+        )
+        
+        return asr_pipeline, translator, sentiment_analyzer
     except Exception as e:
-        st.error(f"❌ Error: {e}")
-finally:
-    os.remove(audio_path)
+        st.error(f"Model loading failed: {str(e)}")
+        st.stop()
+
+# Load models
+asr_model, translator, sentiment_analyzer = load_models()
+
+def process_audio(audio_path):
+    try:
+        # Transcribe with IndicWav2Vec
+        hindi_text = asr_model(audio_path)["text"]
+        
+        # Translate to English
+        english_text = translator.translate(hindi_text, src='hi', dest='en').text
+        
+        # Generate summary (first 2 sentences)
+        sentences = [s.strip() for s in english_text.split('.') if s.strip()]
+        summary = '. '.join(sentences[:2]) + '.' if len(sentences) > 2 else english_text
+        
+        # Sentiment analysis
+        sentiment_result = sentiment_analyzer(english_text[:512])[0]
+        
+        return {
+            "Hindi Transcript": hindi_text,
+            "English Translation": english_text,
+            "Summary": summary,
+            "Sentiment": f"{sentiment_result['label']} ({sentiment_result['score']:.0%} confidence)"
+        }
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
+        return None
+
+# Main app
+def main():
+    # Audio input
+    audio_bytes = audio_recorder(
+        pause_threshold=5.0,
+        sample_rate=16000,
+        text="Click to record Hindi/Hinglish"
+    )
+    
+    if audio_bytes:
+        st.audio(audio_bytes, format="audio/wav")
+        
+        if st.button("🚀 Process Audio", type="primary"):
+            with st.spinner("Processing..."):
+                # Save to temp WAV file
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    # Convert bytes to numpy array
+                    audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+                    
+                    # Write WAV file
+                    with wave.open(tmp.name, 'wb') as wav:
+                        wav.setnchannels(1)
+                        wav.setsampwidth(2)  # 16-bit
+                        wav.setframerate(16000)
+                        wav.writeframes(audio_array.tobytes())
+                    
+                    # Process audio
+                    results = process_audio(tmp.name)
+                
+                # Clean up
+                try:
+                    os.unlink(tmp.name)
+                except:
+                    pass
+                
+                # Display results
+                if results:
+                    st.subheader("Results")
+                    st.json(results)
+                    
+                    st.download_button(
+                        "📥 Download Results",
+                        str(results),
+                        file_name="hindi_audio_results.json"
+                    )
+
+if __name__ == "__main__":
+    main()
