@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import tempfile
-import subprocess
+import wave
 from audio_recorder_streamlit import audio_recorder
 from transformers import pipeline
 import whisper
@@ -9,19 +9,6 @@ import warnings
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
-
-# Check and install FFmpeg if not available
-try:
-    subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-except:
-    st.warning("FFmpeg is required for audio processing. Installing now...")
-    try:
-        subprocess.run(["apt-get", "update"], check=True)
-        subprocess.run(["apt-get", "install", "-y", "ffmpeg"], check=True)
-        st.success("FFmpeg installed successfully!")
-    except Exception as e:
-        st.error(f"Failed to install FFmpeg: {str(e)}")
-        st.stop()
 
 # App title and config
 st.set_page_config(page_title="Hindi/Hinglish Audio Processor", layout="wide")
@@ -51,11 +38,31 @@ def load_models():
 
 whisper_model, translator, sentiment_analyzer = load_models()
 
+def validate_wav(filepath):
+    """Check if the file is a valid WAV file"""
+    try:
+        with wave.open(filepath, 'rb') as f:
+            if f.getnchannels() == 1 and f.getsampwidth() == 2 and f.getframerate() in [8000, 16000, 44100]:
+                return True
+        return False
+    except:
+        return False
+
+def convert_to_wav_if_needed(filepath):
+    """Convert audio to WAV format if needed (simplified version)"""
+    # Since we're avoiding FFmpeg, we'll only accept proper WAV files
+    if not validate_wav(filepath):
+        raise ValueError("Only 16-bit mono WAV files at 16kHz sample rate are supported")
+    return filepath
+
 # Function to process audio
 def process_audio(audio_file_path):
     try:
+        # Convert/validate audio format
+        wav_path = convert_to_wav_if_needed(audio_file_path)
+        
         # Transcribe with Whisper
-        result = whisper_model.transcribe(audio_file_path)
+        result = whisper_model.transcribe(wav_path)
         hindi_text = result["text"]
         
         # Translate to English
@@ -82,11 +89,12 @@ def process_audio(audio_file_path):
 # Audio input section
 with st.sidebar:
     st.header("Audio Input")
-    input_method = st.radio("Choose input method:", ("Record Audio", "Upload Audio File"))
+    input_method = st.radio("Choose input method:", ("Record Audio", "Upload WAV File"))
     
     audio_file = None
     
     if input_method == "Record Audio":
+        st.write("Please record in Hindi/Hinglish (minimum 5 seconds):")
         audio_bytes = audio_recorder(pause_threshold=5.0, sample_rate=16000)
         if audio_bytes:
             st.audio(audio_bytes, format="audio/wav")
@@ -94,17 +102,21 @@ with st.sidebar:
                 tmp.write(audio_bytes)
                 audio_file = tmp.name
     else:
-        uploaded_file = st.file_uploader("Upload audio file", type=["wav", "mp3", "ogg"])
+        uploaded_file = st.file_uploader("Upload WAV file", type=["wav"])
         if uploaded_file:
-            st.audio(uploaded_file, format="audio/wav")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                 tmp.write(uploaded_file.read())
                 audio_file = tmp.name
+            if validate_wav(audio_file):
+                st.audio(audio_file, format="audio/wav")
+            else:
+                st.error("Invalid WAV file. Please upload a 16-bit mono WAV file at 16kHz sample rate")
+                audio_file = None
 
 # Main processing
 if audio_file:
     if st.button("Process Audio"):
-        with st.spinner("Processing..."):
+        with st.spinner("Processing audio..."):
             results = process_audio(audio_file)
             
             if results:
@@ -147,14 +159,15 @@ if audio_file:
         if os.path.exists(audio_file):
             os.unlink(audio_file)
 else:
-    st.info("Please record or upload an audio file")
+    st.info("Please record or upload a WAV audio file")
 
 st.markdown("""
 ### Instructions:
-1. Record or upload Hindi/Hinglish audio (5+ seconds)
-2. Click "Process Audio"
-3. View results in tabs
-4. Download any results as text files
+1. Record or upload a WAV audio file (16-bit mono, 16kHz sample rate)
+2. Audio should be in Hindi or Hinglish
+3. Click "Process Audio"
+4. View results in different tabs
+5. Download any results as text files
 
 Note: First run will take 2-3 minutes to download models.
 """)
