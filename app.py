@@ -1,6 +1,6 @@
 import streamlit as st
 import tempfile
-import os
+import wave
 import numpy as np
 from transformers import pipeline as hf_pipeline
 from audio_recorder_streamlit import audio_recorder
@@ -15,37 +15,37 @@ st.title("🎙️ Hindi/Hinglish Audio Processor")
 @st.cache_resource
 def load_models():
     try:
-        # Load Whisper model (using small for balance of speed/accuracy)
-        whisper_model = whisper.load_model("small")
+        # Load Whisper model (using tiny for CPU efficiency)
+        model = whisper.load_model("tiny")
         
         # Initialize translator
         translator = Translator()
         
-        # Explicitly load sentiment analysis model
-        sentiment_analyzer = hf_pipeline(
+        # Load sentiment analysis model explicitly
+        sentiment = hf_pipeline(
             "sentiment-analysis",
             model="distilbert-base-uncased-finetuned-sst-2-english"
         )
         
-        return whisper_model, translator, sentiment_analyzer
+        return model, translator, sentiment
     except Exception as e:
-        st.error(f"Failed to load models: {str(e)}")
+        st.error(f"Model loading failed: {str(e)}")
         st.stop()
 
-# Load models when app starts
+# Load models
 whisper_model, translator, sentiment_analyzer = load_models()
 
-def create_valid_wav(audio_bytes, sample_rate=16000):
-    """Convert raw audio bytes to valid WAV format"""
+def create_proper_wav(audio_bytes, sample_rate=16000):
+    """Convert raw audio bytes to proper WAV format without FFmpeg"""
     try:
-        # Convert to numpy array (assuming 16-bit PCM)
+        # Convert to numpy array (16-bit PCM)
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
         
         # Create temp file
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            with wave.open(tmp, 'wb') as wav:
+            with wave.open(tmp.name, 'wb') as wav:
                 wav.setnchannels(1)
-                wav.setsampwidth(2)
+                wav.setsampwidth(2)  # 16-bit
                 wav.setframerate(sample_rate)
                 wav.writeframes(audio_array.tobytes())
             return tmp.name
@@ -53,7 +53,6 @@ def create_valid_wav(audio_bytes, sample_rate=16000):
         st.error(f"Audio conversion failed: {str(e)}")
         return None
 
-# Audio processing function
 def process_audio(audio_path):
     try:
         # Transcribe with Whisper
@@ -63,8 +62,8 @@ def process_audio(audio_path):
         # Translate to English
         english_text = translator.translate(hindi_text, src='hi', dest='en').text
         
-        # Generate summary (first 2 meaningful sentences)
-        sentences = [s.strip() for s in english_text.split('.') if len(s.strip()) > 10]
+        # Generate summary
+        sentences = [s.strip() for s in english_text.split('.') if s.strip()]
         summary = '. '.join(sentences[:2]) + '.' if len(sentences) > 2 else english_text
         
         # Sentiment analysis
@@ -74,22 +73,21 @@ def process_audio(audio_path):
             "Hindi Transcript": hindi_text,
             "English Translation": english_text,
             "Summary": summary,
-            "Sentiment": f"{sentiment_result['label']} ({sentiment_result['score']:.0%} confidence)"
+            "Sentiment": f"{sentiment_result['label']} ({sentiment_result['score']:.0%})"
         }
     except Exception as e:
         st.error(f"Processing error: {str(e)}")
         return None
 
-# Main app interface
+# Main app
 def main():
-    # Audio input options
+    # Audio input
     st.sidebar.header("Input Options")
-    input_method = st.sidebar.radio("Select input method:", ("Record Audio", "Upload Audio File"))
-
+    input_method = st.sidebar.radio("Select:", ("Record", "Upload WAV"))
+    
     audio_data = None
     
-    if input_method == "Record Audio":
-        st.write("Speak in Hindi/Hinglish (minimum 5 seconds):")
+    if input_method == "Record":
         audio_bytes = audio_recorder(
             pause_threshold=5.0,
             sample_rate=16000,
@@ -99,41 +97,35 @@ def main():
             st.audio(audio_bytes, format="audio/wav")
             audio_data = audio_bytes
     else:
-        uploaded_file = st.file_uploader("Upload WAV file (16-bit mono, 16kHz)", type=["wav"])
+        uploaded_file = st.file_uploader("Upload 16-bit mono WAV", type=["wav"])
         if uploaded_file:
             audio_data = uploaded_file.read()
             st.audio(audio_data, format="audio/wav")
 
-    # Process audio when available
-    if audio_data:
-        if st.button("🚀 Process Audio", type="primary"):
-            with st.spinner("Processing your audio..."):
-                # Create valid WAV file
-                audio_path = create_valid_wav(audio_data)
+    if audio_data and st.button("🚀 Process", type="primary"):
+        with st.spinner("Processing..."):
+            # Create proper WAV file
+            wav_path = create_proper_wav(audio_data)
+            
+            if wav_path:
+                results = process_audio(wav_path)
                 
-                if audio_path:
-                    # Process the audio file
-                    results = process_audio(audio_path)
+                # Clean up
+                try:
+                    os.unlink(wav_path)
+                except:
+                    pass
+                
+                if results:
+                    st.subheader("Results")
+                    st.json(results)
                     
-                    # Clean up temp file
-                    try:
-                        os.unlink(audio_path)
-                    except:
-                        pass
-                    
-                    # Display results
-                    if results:
-                        st.subheader("Results")
-                        st.json(results)
-                        
-                        # Download button
-                        st.download_button(
-                            "💾 Download Results",
-                            str(results),
-                            file_name="audio_analysis_results.json",
-                            mime="application/json"
-                        )
+                    st.download_button(
+                        "📥 Download",
+                        str(results),
+                        file_name="results.json"
+                    )
 
 if __name__ == "__main__":
-    import wave
+    import os
     main()
