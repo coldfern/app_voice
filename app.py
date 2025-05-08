@@ -1,12 +1,11 @@
 import streamlit as st
 import os
 import tempfile
-import base64
+from audio_recorder_streamlit import audio_recorder
 from transformers import pipeline
 import whisper
 import warnings
-from indic_transliteration import sanscript
-from indic_transliteration.sanscript import transliterate
+from googletrans import Translator
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -18,14 +17,14 @@ st.title("🇮🇳 Hindi/Hinglish Audio Processor")
 # Initialize models (cache them for performance)
 @st.cache_resource
 def load_models():
-    # Whisper model for transcription (small is faster than base for Hindi)
-    whisper_model = whisper.load_model("small")
+    # Whisper model for transcription (tiny is fastest, small for better accuracy)
+    whisper_model = whisper.load_model("tiny")
     
-    # Translation pipeline (Helsinki-NLP Opus MT models)
+    # Translation using Helsinki-NLP (free model)
     translator = pipeline("translation", model="Helsinki-NLP/opus-mt-hi-en")
     
     # Sentiment analysis pipeline
-    sentiment_analyzer = pipeline("sentiment-analysis", model="finiteautomata/bertweet-base-sentiment-analysis")
+    sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
     
     return whisper_model, translator, sentiment_analyzer
 
@@ -40,9 +39,9 @@ def process_audio(audio_file_path):
     # Translate to English
     try:
         english_text = translator(hindi_text)[0]['translation_text']
-    except:
-        # Fallback to transliteration if translation fails
-        english_text = transliterate(hindi_text, sanscript.DEVANAGARI, sanscript.ITRANS)
+    except Exception as e:
+        st.warning(f"Translation failed: {e}")
+        english_text = "Could not translate. Original text: " + hindi_text
     
     # Generate summary (simple approach)
     sentences = english_text.split('. ')
@@ -62,62 +61,25 @@ def process_audio(audio_file_path):
         "sentiment": sentiment
     }
 
-# HTML and JS for audio recording
-audio_recorder_html = """
-    <script>
-        let mediaRecorder;
-        let audioChunks = [];
-
-        // Initialize recorder
-        function startRecording() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
-                    mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks);
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        const audio = document.createElement('audio');
-                        audio.controls = true;
-                        audio.src = audioUrl;
-                        document.getElementById('audioContainer').appendChild(audio);
-
-                        const audioData = audioBlob;
-                        const reader = new FileReader();
-                        reader.onloadend = function () {
-                            const base64Audio = reader.result.split(',')[1];
-                            const audioDataElement = document.getElementById('audioData');
-                            audioDataElement.value = base64Audio;
-                        }
-                        reader.readAsDataURL(audioBlob);
-                    }
-                    mediaRecorder.start();
-                });
-        }
-
-        // Stop recording
-        function stopRecording() {
-            mediaRecorder.stop();
-        }
-    </script>
-    <button onclick="startRecording()">Start Recording</button>
-    <button onclick="stopRecording()">Stop Recording</button>
-    <div id="audioContainer"></div>
-    <input type="hidden" id="audioData">
-"""
-
-# Display HTML and JS in Streamlit
-st.components.v1.html(audio_recorder_html, height=300)
-
 # Sidebar for audio input
 with st.sidebar:
     st.header("Audio Input Options")
     input_method = st.radio("Choose input method:", ("Record Audio", "Upload Audio File"))
     
+    audio_data = None
     audio_file = None
-    audio_data = st.text_input("Audio Data (Base64)")  # To get the base64 data from JS
     
-    if input_method == "Upload Audio File":
+    if input_method == "Record Audio":
+        st.write("Record your Hindi/Hinglish audio (5 seconds minimum):")
+        audio_bytes = audio_recorder(pause_threshold=5.0, sample_rate=16_000)
+        
+        if audio_bytes:
+            st.audio(audio_bytes, format="audio/wav")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_bytes)
+                audio_file = tmp.name
+    
+    else:  # Upload Audio File
         audio_file = st.file_uploader("Upload audio file", type=["wav", "mp3", "ogg"])
         if audio_file:
             st.audio(audio_file, format="audio/wav")
@@ -126,14 +88,6 @@ with st.sidebar:
                 audio_file = tmp.name
 
 # Main processing
-if audio_data:
-    # Convert base64 to binary
-    audio_bytes = base64.b64decode(audio_data)
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(audio_bytes)
-        audio_file = tmp.name
-
 if audio_file:
     if st.button("Process Audio"):
         with st.spinner("Processing your audio... This may take 1-2 minutes..."):
@@ -141,7 +95,7 @@ if audio_file:
                 results = process_audio(audio_file)
                 
                 # Display results in tabs
-                tab1, tab2, tab3, tab4 = st.tabs([ 
+                tab1, tab2, tab3, tab4 = st.tabs([
                     "Hindi Transcript", 
                     "English Translation", 
                     "Summary", 
