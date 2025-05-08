@@ -1,5 +1,6 @@
 import streamlit as st
-import sounddevice as sd
+import pyaudio
+import wave
 import numpy as np
 import scipy.io.wavfile as wav
 import torch
@@ -19,10 +20,25 @@ translator = Translator()
 # Function to record audio
 def record_audio(duration, sample_rate=16000):
     st.write("🎙️ Recording...")
-    audio = sd.rec(int(duration * sample_rate), samplerate=sample_rate, channels=1, dtype='int16')
-    sd.wait()
+    
+    p = pyaudio.PyAudio()
+    stream = p.open(format=pyaudio.paInt16,
+                    channels=1,
+                    rate=sample_rate,
+                    input=True,
+                    frames_per_buffer=1024)
+
+    frames = []
+    for _ in range(0, int(sample_rate / 1024 * duration)):
+        data = stream.read(1024)
+        frames.append(data)
+
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+    
     st.write("✅ Recording complete.")
-    return audio, sample_rate
+    return np.frombuffer(b''.join(frames), sample_rate
 
 # Function to save audio as WAV
 def save_audio(audio, sample_rate, filename="recorded_audio.wav"):
