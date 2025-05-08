@@ -2,30 +2,28 @@ import streamlit as st
 import tempfile
 import wave
 import numpy as np
-from transformers import pipeline as hf_pipeline
-from audio_recorder_streamlit import audio_recorder
+from transformers import pipeline
 import whisper
 from googletrans import Translator
+from audio_recorder_streamlit import audio_recorder
+import os
 
 # App setup
-st.set_page_config(page_title="Hindi Audio Processor", layout="centered")
-st.title("🎙️ Hindi/Hinglish Audio Processor")
+st.set_page_config(page_title="Auto Hindi Transcriber", layout="centered")
+st.title("🎙️ Auto Hindi/Hinglish Transcriber")
 
 # Initialize models (cached)
 @st.cache_resource
 def load_models():
     try:
-        # Load Whisper model (using tiny for CPU efficiency)
-        model = whisper.load_model("tiny")
+        # Load Whisper model (small for balance of speed/accuracy)
+        model = whisper.load_model("small")
         
         # Initialize translator
         translator = Translator()
         
-        # Load sentiment analysis model explicitly
-        sentiment = hf_pipeline(
-            "sentiment-analysis",
-            model="distilbert-base-uncased-finetuned-sst-2-english"
-        )
+        # Load sentiment analysis
+        sentiment = pipeline("sentiment-analysis")
         
         return model, translator, sentiment
     except Exception as e:
@@ -35,8 +33,8 @@ def load_models():
 # Load models
 whisper_model, translator, sentiment_analyzer = load_models()
 
-def create_proper_wav(audio_bytes, sample_rate=16000):
-    """Convert raw audio bytes to proper WAV format without FFmpeg"""
+def audio_to_wav(audio_bytes, sample_rate=16000):
+    """Convert raw audio bytes to proper WAV format"""
     try:
         # Convert to numpy array (16-bit PCM)
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
@@ -81,51 +79,54 @@ def process_audio(audio_path):
 
 # Main app
 def main():
-    # Audio input
-    st.sidebar.header("Input Options")
-    input_method = st.sidebar.radio("Select:", ("Record", "Upload WAV"))
+    # Record audio
+    st.write("Speak in Hindi/Hinglish (minimum 5 seconds):")
+    audio_bytes = audio_recorder(
+        pause_threshold=5.0,
+        sample_rate=16000,
+        text="Click to record",
+        recording_color="#e8b62c",
+        neutral_color="#6aa36f"
+    )
     
-    audio_data = None
-    
-    if input_method == "Record":
-        audio_bytes = audio_recorder(
-            pause_threshold=5.0,
-            sample_rate=16000,
-            text="Click to record"
-        )
-        if audio_bytes:
-            st.audio(audio_bytes, format="audio/wav")
-            audio_data = audio_bytes
-    else:
-        uploaded_file = st.file_uploader("Upload 16-bit mono WAV", type=["wav"])
-        if uploaded_file:
-            audio_data = uploaded_file.read()
-            st.audio(audio_data, format="audio/wav")
-
-    if audio_data and st.button("🚀 Process", type="primary"):
-        with st.spinner("Processing..."):
-            # Create proper WAV file
-            wav_path = create_proper_wav(audio_data)
-            
-            if wav_path:
-                results = process_audio(wav_path)
+    if audio_bytes:
+        st.audio(audio_bytes, format="audio/wav")
+        
+        if st.button("🚀 Transcribe & Analyze", type="primary"):
+            with st.spinner("Processing..."):
+                # Auto-convert to WAV
+                wav_path = audio_to_wav(audio_bytes)
                 
-                # Clean up
-                try:
-                    os.unlink(wav_path)
-                except:
-                    pass
-                
-                if results:
-                    st.subheader("Results")
-                    st.json(results)
+                if wav_path:
+                    # Process the audio
+                    results = process_audio(wav_path)
                     
-                    st.download_button(
-                        "📥 Download",
-                        str(results),
-                        file_name="results.json"
-                    )
+                    # Clean up temp file
+                    try:
+                        os.unlink(wav_path)
+                    except:
+                        pass
+                    
+                    # Display results
+                    if results:
+                        st.subheader("Hindi Transcript")
+                        st.write(results["Hindi Transcript"])
+                        
+                        st.subheader("English Translation")
+                        st.write(results["English Translation"])
+                        
+                        st.subheader("Summary")
+                        st.write(results["Summary"])
+                        
+                        st.subheader("Sentiment Analysis")
+                        st.write(results["Sentiment"])
+                        
+                        # Download button
+                        st.download_button(
+                            "💾 Download Results",
+                            str(results),
+                            file_name="transcription_results.json"
+                        )
 
 if __name__ == "__main__":
-    import os
     main()
