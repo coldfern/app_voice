@@ -6,3 +6,4 @@ vaderSentiment
 streamlit-audiorecorder
 tensorflow
 torch
+keras==2.11
