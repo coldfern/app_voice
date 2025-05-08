@@ -1,6 +1,8 @@
-streamlit==1.28.0
-transformers==4.38.2
-torch==2.2.2
+streamlit
+SpeechRecognition
+pydub
+transformers
+torch
 googletrans==4.0.0-rc1
-audio-recorder-streamlit==0.0.8
-numpy==1.26.0
+vaderSentiment
+streamlit-audiorecorder
