@@ -1,9 +1,6 @@
 streamlit
-SpeechRecognition
-transformers
-googletrans==4.0.0-rc1
-vaderSentiment
-streamlit-audiorecorder
-tensorflow
+sounddevice
+numpy
 torch
-keras==2.11
+openai-whisper
+deep_translator
