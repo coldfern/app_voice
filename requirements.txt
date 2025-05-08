@@ -1,9 +1,5 @@
-streamlit>=1.20.0
-streamlit-webrtc>=0.45.0
-transformers>=4.30.0
-torch>=1.13.0
-torchaudio>=0.13.0
-librosa>=0.9.2
-soundfile>=0.12.1
-numpy>=1.24.0
-av>=10.0.0
+streamlit==1.28.0
+transformers==4.30.2  # Lighter version
+torch==2.0.1          # Optimized for CPU
+numpy==1.24.3         # Stable version
+audio-recorder-streamlit==0.0.8
