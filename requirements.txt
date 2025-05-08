@@ -1,6 +1,6 @@
 streamlit==1.28.0
 torch==2.2.2
-whisper==20231117
+whisper
 transformers==4.38.2
 audio-recorder-streamlit==0.0.8
 googletrans==4.0.0-rc1
