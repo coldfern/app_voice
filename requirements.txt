@@ -1,7 +1,6 @@
 streamlit==1.28.0
-torch==2.2.2
-openai-whisper==20231117
 transformers==4.38.2
 audio-recorder-streamlit==0.0.8
 numpy>=1.26.0
 setuptools>=68.0.0
+torch==2.2.2
