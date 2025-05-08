@@ -2,16 +2,15 @@ import streamlit as st
 import tempfile
 import wave
 import numpy as np
-from transformers import pipeline
+from transformers import pipeline as transformers_pipeline
 import whisper
 from googletrans import Translator
 from audio_recorder_streamlit import audio_recorder
 import os
-
-# Suppress warnings
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
+
+# Suppress all warnings
+warnings.filterwarnings("ignore")
 
 # App setup
 st.set_page_config(page_title="Hindi Audio Processor", layout="centered")
@@ -22,14 +21,14 @@ st.title("🎙️ Hindi/Hinglish Audio Processor")
 def load_models():
     try:
         # Load Whisper model with explicit FP32
-        model = whisper.load_model("small")
+        model = whisper.load_model("base")
         
         # Initialize translator
         translator = Translator()
         
-        # Explicitly load sentiment model to avoid warnings
-        sentiment = pipeline(
-            "sentiment-analysis",
+        # Load sentiment analysis model with explicit specification
+        sentiment = transformers_pipeline(
+            task="sentiment-analysis",
             model="distilbert-base-uncased-finetuned-sst-2-english",
             framework="pt"
         )
@@ -90,7 +89,9 @@ def main():
     audio_bytes = audio_recorder(
         pause_threshold=5.0,
         sample_rate=16000,
-        text="Click to record Hindi/Hinglish"
+        text="Click to record Hindi/Hinglish",
+        recording_color="#e8b62c",
+        neutral_color="#6aa36f"
     )
     
     if audio_bytes:
@@ -116,9 +117,9 @@ def main():
                         st.json(results)
                         
                         st.download_button(
-                            "📥 Download",
+                            "📥 Download Results",
                             str(results),
-                            file_name="results.json"
+                            file_name="hindi_audio_results.json"
                         )
 
 if __name__ == "__main__":
