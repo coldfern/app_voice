@@ -96,7 +96,7 @@ if audio_file:
                 results = process_audio(audio_file)
                 
                 # Display results in tabs
-                tab1, tab2, tab3, tab4 = st.tabs([
+                tab1, tab2, tab3, tab4 = st.tabs([ 
                     "Hindi Transcript", 
                     "English Translation", 
                     "Summary", 
