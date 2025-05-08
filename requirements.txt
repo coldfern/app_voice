@@ -1,7 +1,7 @@
 streamlit==1.33.0
-whisper
-torchaudio
-transformers==4.37.2
+whisper==1.0.0
 torch==2.2.0
-sentencepiece
+transformers==4.37.2
+torchaudio==0.13.0
+sentencepiece==0.1.96
 indic-transliteration==1.2.0
