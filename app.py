@@ -5,7 +5,6 @@ import os
 from transformers import pipeline
 from googletrans import Translator
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from pydub import AudioSegment
 from audiorecorder import audiorecorder
 
 st.set_page_config(page_title="Hindi Audio App", layout="centered")
@@ -13,8 +12,7 @@ st.title("🎙️ Hindi/Hinglish Audio Summarizer")
 
 @st.cache_resource
 def load_models():
-    summarizer = pipeline("summarization", model="google/pegasus-xsum")
-    return summarizer
+    return pipeline("summarization", model="google/pegasus-xsum")
 
 summarizer = load_models()
 translator = Translator()
@@ -24,7 +22,7 @@ st.header("🎛️ Record or Upload Audio")
 
 audio_bytes = audiorecorder("Click to record", "Recording...")
 
-uploaded_file = st.file_uploader("Or upload an audio file (mp3/wav)", type=["mp3", "wav"])
+uploaded_file = st.file_uploader("Or upload a WAV file", type=["wav"])
 
 audio_path = None
 
@@ -34,11 +32,7 @@ if audio_bytes:
         audio_path = f.name
 elif uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        if uploaded_file.type == "audio/mp3":
-            sound = AudioSegment.from_file(uploaded_file, format="mp3")
-            sound.export(f.name, format="wav")
-        else:
-            f.write(uploaded_file.read())
+        f.write(uploaded_file.read())
         audio_path = f.name
 
 if audio_path:
@@ -70,7 +64,7 @@ if audio_path:
             st.write(f"{sentiment_label} ({sentiment})")
 
         except Exception as e:
-            st.error(f"❌ Error during processing: {e}")
+            st.error(f"❌ Error: {e}")
     os.remove(audio_path)
 else:
-    st.info("Please record or upload an audio file to begin.")
+    st.info("Please record or upload a WAV file to begin.")
