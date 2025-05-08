@@ -208,12 +208,5 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-</content>
-</create_file>
 
-<attempt_completion>
-✅ Streamlit app created: A full single-file Streamlit app that allows you to record Hindi/Hinglish audio or upload a WAV audio file (no ffmpeg usage). The app transcribes the audio into Hindi/Hinglish text using Google's speech recognition, translates it into English, provides a summary, and does sentiment analysis. The UI is modern, mobile responsive, and user-friendly for direct interaction.
 
-To run the app:
-1. Install dependencies:
-   
