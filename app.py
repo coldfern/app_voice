@@ -1,70 +1,84 @@
 import streamlit as st
-import speech_recognition as sr
-import tempfile
+import sounddevice as sd
+import numpy as np
+import wave
+import threading
 import os
-from transformers import pipeline
-from googletrans import Translator
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from audiorecorder import audiorecorder
+import torch
+import whisper
+from deep_translator import GoogleTranslator
 
-st.set_page_config(page_title="Hindi Audio App", layout="centered")
-st.title("🎙️ Hindi/Hinglish Audio Summarizer")
+# Load the Whisper model
+model = whisper.load_model("small")
 
-@st.cache_resource
-def load_models():
-    return pipeline("summarization", model="google/pegasus-xsum")
+def save_audio(filename, data, samplerate):
+    """Save recorded audio to a WAV file."""
+    with wave.open(filename, "wb") as wf:
+        wf.setnchannels(1)  # Mono channel
+        wf.setsampwidth(2)  # 16-bit PCM
+        wf.setframerate(samplerate)
+        wf.writeframes(data)
 
-summarizer = load_models()
-translator = Translator()
-analyzer = SentimentIntensityAnalyzer()
+def record_audio(duration, samplerate=44100):
+    """Record audio for a given duration."""
+    st.session_state.recording = True
+    buffer = []
+    def callback(indata, frames, time, status):
+        if status:
+            print(status)
+        buffer.append(indata.copy())
+    
+    with sd.InputStream(callback=callback, channels=1, samplerate=samplerate, dtype='int16'):
+        while st.session_state.recording:
+            sd.sleep(100)
+    
+    audio_data = np.concatenate(buffer, axis=0)
+    audio_data = (audio_data * 32767).astype(np.int16)  # Convert to int16
+    save_audio("recorded_audio.wav", audio_data.tobytes(), samplerate)
+    st.session_state.recording = False
 
-st.header("🎛️ Record or Upload Audio")
+def stop_recording():
+    """Stop the audio recording."""
+    st.session_state.recording = False
 
-audio_bytes = audiorecorder("Click to record", "Recording...")
+def transcribe_audio(filename):
+    """Transcribe the Hindi audio using Whisper."""
+    result = model.transcribe(filename, language="hi")
+    return result["text"]
 
-uploaded_file = st.file_uploader("Or upload a WAV file", type=["wav"])
+def translate_text(text):
+    """Translate Hindi text to English."""
+    translator = GoogleTranslator(source='hi', target='en')
+    return translator.translate(text)
 
-audio_path = None
+# Streamlit UI
+st.title("Hindi Audio Transcription & Translation App")
 
-if audio_bytes:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        f.write(audio_bytes)
-        audio_path = f.name
-elif uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        f.write(uploaded_file.read())
-        audio_path = f.name
+if "recording" not in st.session_state:
+    st.session_state.recording = False
 
-if audio_path:
-    recognizer = sr.Recognizer()
-    with sr.AudioFile(audio_path) as source:
-        audio_data = recognizer.record(source)
-        try:
-            st.info("🗣️ Transcribing using Google Web Speech API...")
-            text = recognizer.recognize_google(audio_data, language="hi-IN")
-            st.success("✅ Transcription complete.")
+st.write("Record your Hindi speech and get its transcript along with an English translation.")
 
-            st.subheader("📜 Transcription (Hindi/Hinglish):")
-            st.write(text)
+duration = st.slider("Select Maximum Recording Duration (in seconds)", 10, 1200, 60)
 
-            st.info("🌐 Translating to English...")
-            translation = translator.translate(text, src="hi", dest="en").text
-            st.subheader("🔤 Translation:")
-            st.write(translation)
+if st.button("Start Recording"):
+    if not st.session_state.recording:
+        st.session_state.recording = True
+        threading.Thread(target=record_audio, args=(duration,)).start()
+        st.success("Recording started. Click 'Stop Recording' to end.")
 
-            st.info("🧠 Summarizing...")
-            summary = summarizer(translation, max_length=60, min_length=20, do_sample=False)[0]["summary_text"]
-            st.subheader("📝 Summary:")
-            st.write(summary)
+if st.button("Stop Recording"):
+    stop_recording()
+    st.success("Recording stopped.")
 
-            st.info("📊 Analyzing Sentiment...")
-            sentiment = analyzer.polarity_scores(translation)
-            sentiment_label = max(sentiment, key=sentiment.get).capitalize()
-            st.subheader("💬 Sentiment:")
-            st.write(f"{sentiment_label} ({sentiment})")
+if os.path.exists("recorded_audio.wav"):
+    st.audio("recorded_audio.wav", format="audio/wav")
+    st.write("### Transcription")
+    transcript = transcribe_audio("recorded_audio.wav")
+    st.write(transcript)
+    
+    st.write("### English Translation")
+    translation = translate_text(transcript)
+    st.write(translation)
 
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-    os.remove(audio_path)
-else:
-    st.info("Please record or upload a WAV file to begin.")
+st.write("Note: The maximum recording duration is 20 minutes.")
