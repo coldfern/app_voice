@@ -5,15 +5,14 @@ import whisper
 import argostranslate.package
 import argostranslate.translate
 from transformers import pipeline
-from pathlib import Path
-import base64
+from audio_recorder_streamlit import audio_recorder
 
-# Load whisper model
+# Load Whisper model
 @st.cache_resource
 def load_whisper_model():
     return whisper.load_model("base")
 
-# Load translation model (Hindi -> English)
+# Setup translation
 @st.cache_resource
 def setup_translation():
     packages = argostranslate.package.get_available_packages()
@@ -24,20 +23,21 @@ def setup_translation():
     argostranslate.package.install_from_path(download_path)
     return argostranslate.translate
 
-# Load summarizer and sentiment analyzer
+# Load NLP models
 @st.cache_resource
 def load_nlp_models():
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     sentiment_analyzer = pipeline("sentiment-analysis")
     return summarizer, sentiment_analyzer
 
-st.set_page_config(page_title="Hindi Audio AI", layout="centered")
+# UI layout
+st.set_page_config(page_title="Hindi Audio Analyzer", layout="centered")
 st.title("🎙️ Hindi Audio Transcriber & Analyzer")
 st.markdown("""
-Record or upload Hindi/Hinglish audio. Get a transcript, translation, summary, and sentiment — all for free!
+Record or upload Hindi/Hinglish audio. Get a transcript, translation, summary, and sentiment — all in one place.
 """)
 
-# Option to upload or record
+# Audio input option
 input_mode = st.radio("Choose audio input method:", ["Upload", "Record"])
 
 audio_file = None
@@ -45,63 +45,23 @@ tmp_path = None
 
 if input_mode == "Upload":
     audio_file = st.file_uploader("Upload an audio file (MP3/WAV/M4A)", type=["mp3", "wav", "m4a"])
-else:
-    st.markdown("### 🔴 Record Audio")
-    st.markdown(
-        """
-        <audio id="audio" controls></audio>
-        <br>
-        <button onclick="startRecording()">Start Recording</button>
-        <button onclick="stopRecording()">Stop & Upload</button>
-        <script>
-        let mediaRecorder;
-        let audioChunks = [];
-
-        async function startRecording() {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.start();
-
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
-
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks);
-                const reader = new FileReader();
-                reader.readAsDataURL(audioBlob);
-                reader.onloadend = () => {
-                    const base64Audio = reader.result.split(',')[1];
-                    const pyCmd = `window.parent.postMessage({ type: 'streamlit:setComponentValue', value: "${base64Audio}" }, '*')`;
-                    eval(pyCmd);
-                };
-            };
-        }
-
-        function stopRecording() {
-            mediaRecorder.stop();
-        }
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
-
-    base64_audio = st.query_params().get("audio_data", [None])[0]
-
-    if base64_audio:
-        tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-        with open(tmp_path, "wb") as f:
-            f.write(base64.b64decode(base64_audio))
-        st.audio(tmp_path)
-
-# Process if audio is available
-if audio_file or tmp_path:
     if audio_file:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
             tmp.write(audio_file.read())
             tmp_path = tmp.name
         st.audio(tmp_path, format="audio/mp3")
 
+else:
+    st.subheader("🎤 Record Audio")
+    audio_bytes = audio_recorder(pause_threshold=2.0)
+    if audio_bytes:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+            f.write(audio_bytes)
+            tmp_path = f.name
+        st.audio(tmp_path, format="audio/wav")
+
+# Process the audio
+if tmp_path:
     st.info("⏳ Loading models...")
     whisper_model = load_whisper_model()
     translate = setup_translation()
@@ -113,7 +73,7 @@ if audio_file or tmp_path:
     st.subheader("📝 Hindi Transcript")
     st.write(hindi_text)
 
-    st.info("🌐 Translating...")
+    st.info("🌐 Translating to English...")
     translated_text = translate.translate(hindi_text, "hi", "en")
     st.subheader("🔤 English Translation")
     st.write(translated_text)
